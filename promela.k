@@ -86,6 +86,7 @@ module PROMELA
                   <output color="Orchid"> .List </output>
                   <genv color="purple"> .Map </genv>
                   <store color="Salmon"> .Map </store>
+                  <debug> .List </debug>
                 </T>
 
   // Module
@@ -104,7 +105,7 @@ module PROMELA
   rule .Modules => . [structural]
   rule <thread>... <k> . </k> ...</thread> => .Bag [structural]
 
-  // Mtype
+  /* Mtype Def */
   rule mtype = { .Ids } => . [structural]
   rule <k> mtype = { (C:Id, CL:Ids => CL) } ...</k>
        <mtype>... .Set => SetItem(C) ...</mtype> [structural]
@@ -114,25 +115,31 @@ module PROMELA
   rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
 
   /*** OneDecl TODO distinguish b/w local & global ***/
-  rule mtype .Ivars => . [structural]
+  rule _:Typename .Ivars => . [structural]
   // TODO decl w/o initialization
   rule <k> mtype (X:Id = C:Id, IL:Ivars => IL) ...</k>
        <mtype>... SetItem(C) ...</mtype>
        <genv> Rho => Rho[X <- !N:Int] </genv>
-       <store>... .Map => !N |-> C ...</store>
+       <store>... .Map => !N |-> C ...</store> [structural]
 //       <genv>... .Map => X |-> C ...</genv> [structural]
+  rule <k> int (X:Id = C:Int, IL:Ivars => IL) ...</k>
+       <genv> Rho => Rho[X <- !N:Int] </genv>
+       <store>... .Map => !N |-> C ...</store> [structural]
 
   /*** Sequence & Step ***/
-  syntax Step ::= Guard(Step)
-  syntax Bool ::= Executable(Step) [function]
-  //rule Executable(_:Step) => true [structural]
+
+//  syntax Bool ::= Executable(Step) [function]
+//  rule Executable(_:Step) => true [simplification]
 
   rule .Steps => . [structural]
   rule S:Expr ; SL:Steps => Guard(S) ; SL [structural] // requires _:Expr :=K S [structural]
   rule S:Step ; SL:Steps => S ~> SL [structural, owise]
   rule Guard(S) ; SL:Steps => Guard(S) ~> SL [structural]
-  rule Guard(S) => S ~> Guard(S) [structural]
-  rule true ~> Guard(S) => . [structural]
+  //rule Guard(S) => S ~> Guard(S) [structural]
+  //rule true ~> Guard(_) => . [structural]
+  //rule false ~> Guard(S) => . ~> Guard(S) [structural]
+  // if you define the above rule as 'false ~> .', trouble happens when the program contains false
+  // TODO how to resolve inifinite loop for false guards?
   rule S:Step -> SL:Steps => S ; SL [structural] // syntactic sugar
 
 
@@ -152,7 +159,7 @@ module PROMELA
   // AnyExpr 
   //rule E1:AnyExpr == E2:AnyExpr
   rule Mvalue(C:Id) == Mvalue(C:Id) => true [equality]
-  //rule Mvalue(_:Id) == Mvalue(_:Id) => false [equality, owise]
+  rule Mvalue(_:Id) == Mvalue(_:Id) => false [equality, owise]
 
   // TODO: distinguish from mtype, global & local
   // TODO: IMPORTANT!!! what if the exp evaluates to false??? should give it a second chance!!!!
@@ -163,10 +170,36 @@ module PROMELA
 
   syntax AnyExpr ::= Mval
   syntax Mval ::= Mvalue(Id)
-  rule <k> C:Id => Mvalue(C)  ...</k>
+  rule <k> C:Id => Mvalue(C) ...</k>
        <mtype>... SetItem(C) ...</mtype> [structural]
 
 
   /* Expr */
 
+  /* Guard Semantics */
+  syntax Step ::= Guard(Step) // TODO better change it to Step -> Expr ??
+  syntax Bool ::= Executable(Step, Map, Map) [function] // arg: Guard, genv, store TODO add (local) env
+  syntax KItem ::= GuardEval(AnyExpr, Map, Map) [function]
+ 
+  rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) ==K GuardEval(E2, Rho, Sig) [simplification] //TODO see if it works
+
+  rule GuardEval(X:Varref, Rho:Map, Sig:Map) => Sig[Rho[X]] [simplification]
+  rule GuardEval(C:Int, Rho:Map, Sig:Map) => C [simplification]
+
+  rule <k> Guard(S) => . ...</k>
+       <genv> Rho </genv> <store> Sig </store> requires Executable(Guard(S), Rho, Sig)
+
+  /*rule <k> Guard(E1:AnyExpr == E2:AnyExpr) ...</k>
+       <genv> Rho </genv> <store> Sig </store>
+       <debug> .List =>
+                 ListItem(_:Varref :=K E1) // true
+                 ListItem(_:Int :=K E2) // true
+                 ListItem(_:Map :=K Rho) // true
+                 ListItem(Executable(Guard(E1 == E2), Rho, Sig)) // false
+                 ListItem(Sig[Rho[E1]])
+                 ListItem(E2)
+                 ListItem(Sig[Rho[E1]] ==K E2)
+                 ListItem(GuardEval(E1, Rho, Sig))
+                 ListItem(GuardEval(E2, Rho, Sig))
+       </debug> */
 endmodule 
