@@ -1,3 +1,10 @@
+# PROMELA
+
+## Abstract
+This is the **K** semantic definition of Promela, the modeling language for SPIN model checker.
+
+## Syntax
+```k
 module PROMELA-SYNTAX
   imports DOMAINS-SYNTAX
 
@@ -61,15 +68,17 @@ module PROMELA-SYNTAX
   syntax DeclLst ::= NeList{OneDecl, ";"}
   syntax Ivars ::= NeList{Ivar, ","} [klabel(ivars)]
 //  syntax Ivars ::= Ids // TODO added this because the error msg required subsort decl. resolve this later
+```
 
-
+```k
 endmodule
 
 module PROMELA
   imports PROMELA-SYNTAX
   imports DOMAINS
+```
 
-
+```k
   syntax KResult ::= Int | Bool | String | Mval
 
   configuration <T color="yellow">
@@ -175,7 +184,10 @@ module PROMELA
 
 
   /* Expr */
+```
 
+## Guard Semantics
+```k
   /* Guard Semantics */
   syntax Step ::= Guard(Step) // TODO better change it to Step -> Expr ??
   syntax Bool ::= Executable(Step, Map, Map) [function] // arg: Guard, genv, store TODO add (local) env
@@ -203,3 +215,4 @@ module PROMELA
                  ListItem(GuardEval(E2, Rho, Sig))
        </debug> */
 endmodule 
+```
