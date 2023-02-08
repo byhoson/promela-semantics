@@ -30,6 +30,7 @@ module PROMELA-SYNTAX
   syntax Sequence ::= Steps
 
   syntax Step ::= Stmnt
+                | DeclLst
 
   syntax Ivar ::= Id
                 | Id "=" AnyExpr [strict(2), klabel(ivar)]
@@ -78,6 +79,7 @@ module PROMELA
   imports DOMAINS
 ```
 
+## Configuration
 ```k
   syntax KResult ::= Int | Bool | String | Mval
 
@@ -97,15 +99,18 @@ module PROMELA
                   <store color="Salmon"> .Map </store>
                   <debug> .List </debug>
                 </T>
+```
 
-  // Module
+## Definitions & Declarations
+```k
+  /*** Module ***/
   rule M:Module ML:Modules => M ~> ML [structural]
 
-  // Init
+  /*** Init ***/
   rule <k> init { S:Sequence } => . ...</k>
        (.Bag => <thread>... <k> S </k> ...</thread>) [structural]
 
-  // Proctype
+  /*** Proctype ***/
   rule <k> active proctype _:Id ( ) { S:Sequence } => . ...</k>
        (.Bag => <thread>... <k> S </k> ...</thread>) [structural]
   rule <k> proctype _:Id ( ) { S:Sequence } => . ...</k>
@@ -114,12 +119,12 @@ module PROMELA
   rule .Modules => . [structural]
   rule <thread>... <k> . </k> ...</thread> => .Bag [structural]
 
-  /* Mtype Def */
+  /*** Mtype ***/
   rule mtype = { .Ids } => . [structural]
   rule <k> mtype = { (C:Id, CL:Ids => CL) } ...</k>
        <mtype>... .Set => SetItem(C) ...</mtype> [structural]
 
-  // DeclLst
+  /*** DeclLst ***/
   rule .DeclLst => . [structural]
   rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
 
@@ -134,7 +139,13 @@ module PROMELA
   rule <k> int (X:Id = C:Int, IL:Ivars => IL) ...</k>
        <genv> Rho => Rho[X <- !N:Int] </genv>
        <store>... .Map => !N |-> C ...</store> [structural]
+  rule <k> int
 
+
+```
+
+## Sequences
+```k
   /*** Sequence & Step ***/
 
 //  syntax Bool ::= Executable(Step) [function]
@@ -156,14 +167,30 @@ module PROMELA
   //rule S:Step -> SL:Steps => S ; SL [structural]
   //rule SL1:Steps -> SL2:Steps => SL1 ~> SL2 [structural, owise] // Syntactic Sugar -> TODO can't i use concat for syntactic lists instead of ~>?
   //rule S:Step ; SL:Steps => S ~> SL [structural] // requires Executable(S) [structural]
-  
+```
+
+## Statements
+```k  
   /* Stmnt */
   rule do OL:Options od => OL ~> do OL od [structural]
+
+  // ASSIGNMENT rule X:Varref = I:Int
+
   rule <k> printf ( S:String ) => . ...</k>
        <output>... .List => ListItem(S) </output> [print] 
 
   // Options TODO: implement nondeterministic choice
   rule :: S:Sequence => S [structural]
+```
+
+## Expressions
+```k
+  rule I1:Int + I2:Int => I1 +Int I2
+  rule I1:Int - I2:Int => I1 -Int I2
+  rule I1:Int * I2:Int => I1 *Int I2
+  rule I1:Int / I2:Int => I1 /Int I2
+
+
 
   // AnyExpr 
   //rule E1:AnyExpr == E2:AnyExpr
@@ -187,16 +214,41 @@ module PROMELA
 ```
 
 ## Guard Semantics
+In Promela, if an expression is used as a statement, it behaves as a guard -
+that is, it "blocks" its following statements so long as it evaluates to false.
+Dealing with the semantics of guards is quite tricky, because if naively dealt,
+you might end up with infinite loops for merely checking if the guard is true over and over again.
+Hence, we need to provide a mechanism to determine the result of the guard in a nontrivial way - i.e. only checks whenever something as changed.
+The idea is to separate the guard semantics from the main semantics,
+so that the evaluation of the expression takes place at the meta level which does not affect the main computation.
+
+Once the guard becomes "executable", it should disappear.
+
 ```k
   /* Guard Semantics */
   syntax Step ::= Guard(Step) // TODO better change it to Step -> Expr ??
   syntax Bool ::= Executable(Step, Map, Map) [function] // arg: Guard, genv, store TODO add (local) env
   syntax KItem ::= GuardEval(AnyExpr, Map, Map) [function]
- 
-  rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) ==K GuardEval(E2, Rho, Sig) [simplification] //TODO see if it works
+```
 
+### Executable
+TODO: binary relations e.g. >Int, >K in the definition don't parse. 
+Somehow need to embed GuardEval into values such as Int so >Int on them makes sense.
+```k
+  /* Executable */
+  //rule Executable(Guard(E1:AnyExpr > E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) >K GuardEval(E2, Rho, Sig) [simplification]
+  //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) <K GuardEval(E2, Rho, Sig) [simplification]
+  //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) >=K GuardEval(E2, Rho, Sig) [simplification]
+  //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) <=K GuardEval(E2, Rho, Sig) [simplification]
+  rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) ==K GuardEval(E2, Rho, Sig) [simplification]
+  rule Executable(Guard(E1:AnyExpr != E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) =/=K GuardEval(E2, Rho, Sig) [simplification]
+```
+
+### GuardEval
+```k
+  /* GuardEval */
   rule GuardEval(X:Varref, Rho:Map, Sig:Map) => Sig[Rho[X]] [simplification]
-  rule GuardEval(C:Int, Rho:Map, Sig:Map) => C [simplification]
+  rule GuardEval(C:Int, _:Map, _:Map) => C [simplification]
 
   rule <k> Guard(S) => . ...</k>
        <genv> Rho </genv> <store> Sig </store> requires Executable(Guard(S), Rho, Sig)
