@@ -90,7 +90,7 @@ module PROMELA
                   </procs>
                   <threads color="orange"> // active procs
                     <thread multiplicity="*" color="blue">
-                      <k color="green"> $PGM:Modules </k>
+                      <k color="green"> $PGM:Modules ~> execute </k>
                       <env color="LightSkyBlue"> .Map </env>
                     </thread>
                   </threads> 
@@ -99,6 +99,13 @@ module PROMELA
                   <store color="Salmon"> .Map </store>
                   <debug> .List </debug>
                 </T>
+```
+
+```k
+  syntax KItem ::= "execute"
+  rule <k> execute => . </k>
+       <env> Env </env>
+       <genv> .Map => Env </genv> [structural]     
 ```
 
 ## Definitions & Declarations
@@ -131,15 +138,14 @@ module PROMELA
   /*** OneDecl TODO distinguish b/w local & global ***/
   rule _:Typename .Ivars => . [structural]
   // TODO decl w/o initialization
-  rule <k> mtype (X:Id = C:Id, IL:Ivars => IL) ...</k>
-       <mtype>... SetItem(C) ...</mtype>
-       <genv> Rho => Rho[X <- !N:Int] </genv>
-       <store>... .Map => !N |-> C ...</store> [structural]
-//       <genv>... .Map => X |-> C ...</genv> [structural]
+//  rule <k> mtype (X:Id = C:Id, IL:Ivars => IL) ...</k>
+//       <mtype>... SetItem(C) ...</mtype>
+//       <genv> Rho => Rho[X <- !N:Int] </genv>
+//       <store>... .Map => !N |-> C ...</store> [structural]
+/////       <genv>... .Map => X |-> C ...</genv> [structural]
   rule <k> int (X:Id = C:Int, IL:Ivars => IL) ...</k>
-       <genv> Rho => Rho[X <- !N:Int] </genv>
+       <env> Rho => Rho[X <- !N:Int] </env>
        <store>... .Map => !N |-> C ...</store> [structural]
-  rule <k> int
 
 
 ```
