@@ -2,7 +2,7 @@ KOMPILE_FLAGS=--transition "print"
 KOMPILE_BACKEND=java
 
 kompile:
-	kompile $(KOMPILE_FLAGS) --backend $(KOMPILE_BACKEND) promela.k
+	kompile $(KOMPILE_FLAGS) --backend $(KOMPILE_BACKEND) promela.md
 
 tests/hello.pml: kompile
 	krun tests/hello.pml
