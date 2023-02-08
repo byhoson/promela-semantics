@@ -101,6 +101,11 @@ module PROMELA
                 </T>
 ```
 
+## Initialization
+In order to initialize the configuration with a K cell, preprocessing step is done
+as defined in the `Definitions & Declarations` section.
+After that, the preprocessing K cell is left with the `execute` token, which
+gives signal to actually start off from the initialized configuration, and then disappears.
 ```k
   syntax KItem ::= "execute"
   rule <k> execute => . </k>
@@ -179,9 +184,24 @@ module PROMELA
 ```k  
   /* Stmnt */
   rule do OL:Options od => OL ~> do OL od [structural]
+```
 
-  // ASSIGNMENT rule X:Varref = I:Int
+### Assignments
+TODO: redefine it later with loc wrapper
+```k
+  // ASSIGNMENT 
+  rule <k> X:Varref = I:Int => . ...</k>
+       <env>... X |-> L ...</env>
+       <store>... L |-> (_ => I) ...</store>
+  rule <k> X:Varref = I:Int => . ...</k>
+       <genv>... X |-> L ...</genv>
+       <store>... L |-> (_ => I) ...</store>
 
+
+```
+
+### I/O
+```k
   rule <k> printf ( S:String ) => . ...</k>
        <output>... .List => ListItem(S) </output> [print] 
 
@@ -190,22 +210,27 @@ module PROMELA
 ```
 
 ## Expressions
+### Arithmetic Expressions
 ```k
   rule I1:Int + I2:Int => I1 +Int I2
   rule I1:Int - I2:Int => I1 -Int I2
   rule I1:Int * I2:Int => I1 *Int I2
   rule I1:Int / I2:Int => I1 /Int I2
+```
 
-
-
-  // AnyExpr 
+```k
+  /* AnyExpr */
   //rule E1:AnyExpr == E2:AnyExpr
   rule Mvalue(C:Id) == Mvalue(C:Id) => true [equality]
   rule Mvalue(_:Id) == Mvalue(_:Id) => false [equality, owise]
+```
 
+### Variable Lookup
+```k
   // TODO: distinguish from mtype, global & local
   // TODO: IMPORTANT!!! what if the exp evaluates to false??? should give it a second chance!!!!
   // at the same time, should avoid inifinite loop due to consecutively evaluating to false
+  /* Variable Lookup */
   rule <k> X:Varref => V ...</k>
        <genv>... X |-> L ...</genv>
        <store>... L |-> V ...</store> [lookup]
