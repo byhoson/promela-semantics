@@ -343,6 +343,11 @@ Somehow need to embed GuardEval into values such as Int so >Int on them makes se
   syntax Varref ::= lookup(Int)
   syntax Varref ::= loc(Int)
 
+  // global variable
+  rule <k> lvalue(X:Varref => loc(L)) ...</k> <genv>... X |-> L:Int ...</genv> [structural]
+  // local variable
+  rule <k> lvalue(X:Varref => loc(L)) ...</k> <env>... X |-> L:Int ...</env> [structural]
+
   context lvalue(_:Id [HOLE:AnyExpr])
   context lvalue(HOLE::Id [_::AnyExpr])
 
