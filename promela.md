@@ -2,6 +2,13 @@
 
 ## Abstract
 This is the **K** semantic definition of Promela, the modeling language for SPIN model checker.
+Promela includes the following features:
+- Processes. Promela is by nature a language for concurrent processes.
+- Guards. Guards are typically used with nondeterministic choices, where an option can be chosen
+  only if its guard is executable. In general, whenever an expression is used a statement,
+  it blocks the following statements.
+- Arrays. Promela supports one dimensional arrays. Multidimensional arrays can be constructed indirectly
+  with the use of typedef definitions.
 
 ## Syntax
 ```k
@@ -15,8 +22,8 @@ module PROMELA-SYNTAX
                   | Mtype
                   | DeclLst
 
-  syntax Proctype ::= "active" "proctype" Id "(" ")" "{" Sequence "}"
-                    | "proctype" Id "(" ")" "{" Sequence "}"
+  syntax Proctype ::= "active" "proctype" Name "(" ")" "{" Sequence "}"
+                    | "proctype" Name "(" ")" "{" Sequence "}"
 
   syntax Init ::= "init" "{" Sequence "}"
 
@@ -32,10 +39,13 @@ module PROMELA-SYNTAX
   syntax Step ::= Stmnt
                 | DeclLst
 
-  syntax Ivar ::= Id
-                | Id "=" AnyExpr [strict(2), klabel(ivar)]
+  syntax Ivar ::= Name 
+                | Name "[" Const "]" [klabel(arr_ivar)]
+                | Name "=" AnyExpr [strict(2), klabel(ivar)]
+                | Name "[" Const "]" "=" AnyExpr
 
-  syntax Varref ::= Id
+  syntax Varref ::= Name 
+                  | Name "[" AnyExpr "]" [klabel(arr_varref)]
 
   syntax Assign ::= Varref "=" AnyExpr [strict(2), klabel(assign)]
                   | Varref "++"
@@ -61,6 +71,8 @@ module PROMELA-SYNTAX
   syntax Expr ::= AnyExpr
                 | "(" Expr ")" [bracket]
 
+  syntax Name ::= Id
+
   syntax Const ::= Bool | "skip" | Int
 
   syntax Ids ::= NeList{Id, ","} [klabel(ids)]
@@ -81,8 +93,6 @@ module PROMELA
 
 ## Configuration
 ```k
-  syntax KResult ::= Int | Bool | String | Mval
-
   configuration <T color="yellow">
                   <mtype color="pink"> .Set </mtype>
                   <procs color="LightSalmon"> // inactive procs
@@ -100,6 +110,16 @@ module PROMELA
                   <debug> .List </debug>
                 </T>
 ```
+
+## Values
+Arrays evaluate to array reference values holding the location and the size of the array.
+```k
+  syntax Val ::= Int | array(Int, Int) | loc(Int)
+  syntax Name ::= Val
+  syntax AnyExpr ::= Val
+  syntax KResult ::= Bool | String | Mval | Val
+```
+
 
 ## Initialization
 In order to initialize the configuration with a K cell, preprocessing step is done
@@ -140,6 +160,8 @@ gives signal to actually start off from the initialized configuration, and then 
   rule .DeclLst => . [structural]
   rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
 
+  syntax KItem ::= "undefined"
+
   /*** OneDecl TODO distinguish b/w local & global ***/
   rule _:Typename .Ivars => . [structural]
   // TODO decl w/o initialization
@@ -148,11 +170,19 @@ gives signal to actually start off from the initialized configuration, and then 
 //       <genv> Rho => Rho[X <- !N:Int] </genv>
 //       <store>... .Map => !N |-> C ...</store> [structural]
 /////       <genv>... .Map => X |-> C ...</genv> [structural]
+  /* Int */ // maybe desugaring into a single declaration would be better
   rule <k> int (X:Id = C:Int, IL:Ivars => IL) ...</k>
        <env> Rho => Rho[X <- !N:Int] </env>
        <store>... .Map => !N |-> C ...</store> [structural]
 
+  /* Int Array */
+  //context int _:Id[HOLE]
 
+  rule <k> int (X:Id [ I:Int ], IL:Ivars => IL) ...</k>
+       <env> Env => Env[X <- !N:Int] </env>
+       <store>... .Map => !N |-> array(!N +Int 1, I)
+                          (!N +Int 1) ... (!N +Int I) |-> undefined ...</store>
+    requires I >=Int 0
 ```
 
 ## Sequences
@@ -189,15 +219,17 @@ gives signal to actually start off from the initialized configuration, and then 
 ### Assignments
 TODO: redefine it later with loc wrapper
 ```k
-  // ASSIGNMENT 
-  rule <k> X:Varref = I:Int => . ...</k>
+  context (HOLE => lvalue(HOLE)) = _
+
+  rule <k> loc(L):Varref = V:Val => . ...</k> <store>... L |-> (_ => V) ...</store>
+
+/*  rule <k> X:Varref = I:Int => . ...</k>
        <env>... X |-> L ...</env>
        <store>... L |-> (_ => I) ...</store>
   rule <k> X:Varref = I:Int => . ...</k>
        <genv>... X |-> L ...</genv>
        <store>... L |-> (_ => I) ...</store>
-
-
+*/
 ```
 
 ### I/O
@@ -297,5 +329,28 @@ Somehow need to embed GuardEval into values such as Int so >Int on them makes se
                  ListItem(GuardEval(E1, Rho, Sig))
                  ListItem(GuardEval(E2, Rho, Sig))
        </debug> */
+```
+
+## Auxiliary
+```k
+  syntax Map ::= Int "..." Int "|->" K [function]
+  rule N...M |-> _ => .Map requires N >Int M
+  rule N...M |-> K => N |-> K (N +Int 1)...M |-> K requires N <=Int M
+```
+
+```k
+  syntax Varref ::= lvalue(K)
+  syntax Varref ::= lookup(Int)
+  syntax Varref ::= loc(Int)
+
+  context lvalue(_:Id [HOLE:AnyExpr])
+  context lvalue(HOLE::Id [_::AnyExpr])
+
+  rule array(L,_) [ I:Int ] => lookup(L +Int I) [structural, anywhere]
+
+  rule lvalue(lookup(L:Int) => loc(L)) [structural]
+```
+
+```k
 endmodule 
 ```
