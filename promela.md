@@ -11,6 +11,8 @@ Promela includes the following features:
   with the use of typedef definitions.
 
 ## Syntax
+[Here](https://spinroot.com/spin/Man/grammar.html) is the official definition of the syntax of Promela.
+For clarity, our k definition directly follows the official one.
 ```k
 module PROMELA-SYNTAX
   imports DOMAINS-SYNTAX
@@ -29,12 +31,9 @@ module PROMELA-SYNTAX
 
   syntax Mtype ::= "mtype" "=" "{" Ids "}"
 
-  syntax OneDecl ::= Typename Ivars
-//                   | Typename Ivars "=" AnyExpr
+  syntax OneDecl ::= Typename Ivars [klabel(one_decl)]
 
-  syntax Typename ::= "int" | "bool" | "mtype"
-
-  syntax Sequence ::= Steps
+  syntax Typename ::= "bit" | "byte" | "short" | "int" | "bool" [klabel(bool_T)] | "mtype" | "chan"
 
   syntax Step ::= Stmnt
                 | DeclLst
@@ -73,12 +72,20 @@ module PROMELA-SYNTAX
 
   syntax Name ::= Id
 
-  syntax Const ::= Bool | "skip" | Int
+  syntax Const ::= Bool | "skip" | Int | Id // Id for mtype
 
   syntax Ids ::= NeList{Id, ","} [klabel(ids)]
   syntax Modules ::= NeList{Module, ""} // TODO why ambiguous?
-  syntax Steps ::= NeList{Step, ";"} | Steps "->" Steps // TODO handle -> better!
-  syntax DeclLst ::= NeList{OneDecl, ";"}
+//  syntax Sequence ::= NeList{Step, ";"} [klabel(seq)]
+//                 | Sequence "->" Sequence [klabel(seq)] // TODO handle -> better!
+//  syntax DeclLst ::= NeList{OneDecl, ";"} [klabel(decl_lst)] // TODO klabel : is it ok to identify decls with seq????
+
+  syntax Sequence ::= Step
+                    > Step ";" Sequence [klabel(seq)]
+                    | Step "->" Sequence [macro]
+  syntax DeclLst ::= OneDecl ";" DeclLst [klabel(decl_lst), prefer]
+                   > OneDecl  // [klabel(decl_lst)]
+
   syntax Ivars ::= NeList{Ivar, ","} [klabel(ivars)]
 //  syntax Ivars ::= Ids // TODO added this because the error msg required subsort decl. resolve this later
 ```
@@ -114,10 +121,10 @@ module PROMELA
 ## Values
 Arrays evaluate to array reference values holding the location and the size of the array.
 ```k
-  syntax Val ::= Int | array(Int, Int) | loc(Int)
+  syntax Val ::= Int | Bool | String | array(Int, Int) | loc(Int) | mval(Id) // bit, byte, short
   syntax Name ::= Val
   syntax AnyExpr ::= Val
-  syntax KResult ::= Bool | String | Mval | Val
+  syntax KResult ::= Val
 ```
 
 
@@ -157,23 +164,21 @@ gives signal to actually start off from the initialized configuration, and then 
        <mtype>... .Set => SetItem(C) ...</mtype> [structural]
 
   /*** DeclLst ***/
-  rule .DeclLst => . [structural]
-  rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
+//  rule .DeclLst => . [structural]
+  rule (D:OneDecl ; DL:DeclLst):DeclLst => D ~> DL [structural]
+//  rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
+
 
   syntax KItem ::= "undefined"
 
   /*** OneDecl TODO distinguish b/w local & global ***/
   rule _:Typename .Ivars => . [structural]
-  // TODO decl w/o initialization
-//  rule <k> mtype (X:Id = C:Id, IL:Ivars => IL) ...</k>
-//       <mtype>... SetItem(C) ...</mtype>
-//       <genv> Rho => Rho[X <- !N:Int] </genv>
-//       <store>... .Map => !N |-> C ...</store> [structural]
-/////       <genv>... .Map => X |-> C ...</genv> [structural]
+
+  // TODO: need to generalize to arbitrary typename, even MTYPEs!
   /* Int */ // maybe desugaring into a single declaration would be better
-  rule <k> int (X:Id = C:Int, IL:Ivars => IL) ...</k>
-       <env> Rho => Rho[X <- !N:Int] </env>
-       <store>... .Map => !N |-> C ...</store> [structural]
+  rule <k> _:Typename (X:Id = C:Val, IL:Ivars => IL) ...</k>
+       <env> Rho => Rho[X <- !L:Int] </env>
+       <store>... .Map => !L |-> C ...</store> [structural]
 
   /* Int Array */
   //context int _:Id[HOLE]
@@ -192,16 +197,16 @@ gives signal to actually start off from the initialized configuration, and then 
 //  syntax Bool ::= Executable(Step) [function]
 //  rule Executable(_:Step) => true [simplification]
 
-  rule .Steps => . [structural]
-  rule S:Expr ; SL:Steps => Guard(S) ; SL [structural] // requires _:Expr :=K S [structural]
-  rule S:Step ; SL:Steps => S ~> SL [structural, owise]
-  rule Guard(S) ; SL:Steps => Guard(S) ~> SL [structural]
+//  rule .Sequence => . [structural]
+  rule S:Expr ; SL:Sequence => Guard(S) ; SL [structural] // requires _:Expr :=K S [structural]
+  rule S:Step ; SL:Sequence => S ~> SL [structural, owise]
+  rule Guard(S) ; SL:Sequence => Guard(S) ~> SL [structural]
   //rule Guard(S) => S ~> Guard(S) [structural]
   //rule true ~> Guard(_) => . [structural]
   //rule false ~> Guard(S) => . ~> Guard(S) [structural]
   // if you define the above rule as 'false ~> .', trouble happens when the program contains false
   // TODO how to resolve inifinite loop for false guards?
-  rule S:Step -> SL:Steps => S ; SL [structural] // syntactic sugar
+  rule S:Step -> SL:Sequence => S ; SL [structural] // syntactic sugar
 
 
   //rule .Steps => . [structural]
