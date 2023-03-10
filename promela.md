@@ -46,7 +46,7 @@ module PROMELA-SYNTAX
   syntax Varref ::= Name 
                   | Name "[" AnyExpr "]" [klabel(arr_varref)]
 
-  syntax Assign ::= Varref "=" AnyExpr [strict(2), klabel(assign)]
+  syntax Assign ::= Varref "=" AnyExpr [klabel(assign)]
                   | Varref "++"
                   | Varref "--"
 
@@ -63,7 +63,7 @@ module PROMELA-SYNTAX
                    | "<<" | ">>"
 
   syntax AnyExpr ::= "(" AnyExpr ")" [bracket]
-                   | AnyExpr Binarop AnyExpr [strict(1,3)] // TODO how about short-circuiting?
+                   | AnyExpr Binarop AnyExpr  // TODO how about short-circuiting?
                    | Varref // TODO for now, varref also takes care of mtype values. fix this!
                    | Const
                 // but if a new nonterminal is introduced for mtype, how to distinguish?
@@ -85,8 +85,8 @@ module PROMELA-SYNTAX
                     | Step "->" Sequence [macro]
   syntax DeclLst ::= OneDecl ";" DeclLst [klabel(decl_lst), prefer]
                    > OneDecl  // [klabel(decl_lst)]
-
-  syntax Ivars ::= NeList{Ivar, ","} [klabel(ivars)]
+  syntax Ivars ::= Ivar | Ivar "," Ivars [klabel(ivars)]
+//  syntax Ivars ::= NeList{Ivar, ","} [klabel(ivars)]
 //  syntax Ivars ::= Ids // TODO added this because the error msg required subsort decl. resolve this later
 ```
 
@@ -141,6 +141,9 @@ gives signal to actually start off from the initialized configuration, and then 
 ```
 
 ## Definitions & Declarations
+
+### Module Declaration
+A Promela Specification is just a sequence of `Module`s.
 ```k
   /*** Module ***/
   rule M:Module ML:Modules => M ~> ML [structural]
@@ -162,28 +165,40 @@ gives signal to actually start off from the initialized configuration, and then 
   rule mtype = { .Ids } => . [structural]
   rule <k> mtype = { (C:Id, CL:Ids => CL) } ...</k>
        <mtype>... .Set => SetItem(C) ...</mtype> [structural]
+```
 
-  /*** DeclLst ***/
-//  rule .DeclLst => . [structural]
+### Variable Declaration
+The syntactic category `DeclLst` includes multiple declarations with the syntactic category `OneDecl`,
+separated by the separator ";".
+Declarations with the same type can be compactified into a single declaration inside `OneDecl`,
+separated by the separator ",".
+For simplicity, we decompose both `DeclLst` and `OneDecl` into atomic declarations, and define the K rules
+for declaration in terms of atoms.
+TODO: (including arrays)
+- variable scoping
+- init to all zero
+```k
+  syntax KItem ::= "undefined" /* used in declarations with default values */
+
+  /* Decomposing Multiple Declarations */
   rule (D:OneDecl ; DL:DeclLst):DeclLst => D ~> DL [structural]
-//  rule D:OneDecl ; DL:DeclLst => D ~> DL [structural]
+  rule T:Typename I:Ivar, IL:Ivars => T I ~> T IL [structural]
 
+  /* Unfold Declaration with Initialization */
+  rule T:Typename X:Id = E:AnyExpr => T X ~> (X = E):Assign [structural]
 
-  syntax KItem ::= "undefined"
-
-  /*** OneDecl TODO distinguish b/w local & global ***/
-  rule _:Typename .Ivars => . [structural]
-
-  // TODO: need to generalize to arbitrary typename, even MTYPEs!
-  /* Int */ // maybe desugaring into a single declaration would be better
-  rule <k> _:Typename (X:Id = C:Val, IL:Ivars => IL) ...</k>
+  /* Without Initialization */
+  rule <k> _:Typename X:Id => . ...</k>
        <env> Rho => Rho[X <- !L:Int] </env>
-       <store>... .Map => !L |-> C ...</store> [structural]
+       <store>... .Map => !L |-> undefined ...</store> [structural]
+```
 
-  /* Int Array */
+### Array Declaration
+```k
   //context int _:Id[HOLE]
 
-  rule <k> int (X:Id [ I:Int ], IL:Ivars => IL) ...</k>
+  /* Without Initialization */
+  rule <k> _:Typename X:Id [ I:Int ] => . ...</k>
        <env> Env => Env[X <- !N:Int] </env>
        <store>... .Map => !N |-> array(!N +Int 1, I)
                           (!N +Int 1) ... (!N +Int I) |-> undefined ...</store>
@@ -222,63 +237,53 @@ gives signal to actually start off from the initialized configuration, and then 
 ```
 
 ### Assignments
-TODO: redefine it later with loc wrapper
 ```k
+  rule _ = (E:AnyExpr => Eval(E)) requires notBool(isKResult(E))
   context (HOLE => lvalue(HOLE)) = _
 
   rule <k> loc(L):Varref = V:Val => . ...</k> <store>... L |-> (_ => V) ...</store>
-
-/*  rule <k> X:Varref = I:Int => . ...</k>
-       <env>... X |-> L ...</env>
-       <store>... L |-> (_ => I) ...</store>
-  rule <k> X:Varref = I:Int => . ...</k>
-       <genv>... X |-> L ...</genv>
-       <store>... L |-> (_ => I) ...</store>
-*/
 ```
 
 ### I/O
 ```k
   rule <k> printf ( S:String ) => . ...</k>
        <output>... .List => ListItem(S) </output> [print] 
-
-  // Options TODO: implement nondeterministic choice
-  rule :: S:Sequence => S [structural]
 ```
+
 
 ## Expressions
+We establish a separate semantics for expressions.
+While others are defined operationally, we define the semantics for expressions denotationally.
+This is to facilitate the definitions of blocking semantics for guards.
+Note that no interleaving happens during the evaluation of expressions in Promela.
+
 ### Arithmetic Expressions
 ```k
-  rule I1:Int + I2:Int => I1 +Int I2
-  rule I1:Int - I2:Int => I1 -Int I2
-  rule I1:Int * I2:Int => I1 *Int I2
-  rule I1:Int / I2:Int => I1 /Int I2
+  syntax Int ::= Eval(AnyExpr) [function]
+  rule Eval(I:Int) => I [simplification]
+  rule Eval(E1:AnyExpr + E2:AnyExpr) => Eval(E1) +Int Eval(E2) [simplification]
+  rule Eval(E1:AnyExpr - E2:AnyExpr) => Eval(E1) -Int Eval(E2) [simplification]
+  rule Eval(E1:AnyExpr * E2:AnyExpr) => Eval(E1) *Int Eval(E2) [simplification]
+  rule Eval(E1:AnyExpr / E2:AnyExpr) => Eval(E1) /Int Eval(E2) [simplification]
 ```
 
+### Boolean Expressions
+
+### Mtypes
 ```k
-  /* AnyExpr */
-  //rule E1:AnyExpr == E2:AnyExpr
-  rule Mvalue(C:Id) == Mvalue(C:Id) => true [equality]
-  rule Mvalue(_:Id) == Mvalue(_:Id) => false [equality, owise]
+/*  syntax AnyExpr ::= Mval
+  syntax Mval ::= Mvalue(Id)
+  rule <k> C:Id => Mvalue(C) ...</k>
+       <mtype>... SetItem(C) ...</mtype> [structural] */
 ```
+
 
 ### Variable Lookup
 ```k
-  // TODO: distinguish from mtype, global & local
-  // TODO: IMPORTANT!!! what if the exp evaluates to false??? should give it a second chance!!!!
-  // at the same time, should avoid inifinite loop due to consecutively evaluating to false
   /* Variable Lookup */
   rule <k> X:Varref => V ...</k>
        <genv>... X |-> L ...</genv>
        <store>... L |-> V ...</store> [lookup]
-
-  syntax AnyExpr ::= Mval
-  syntax Mval ::= Mvalue(Id)
-  rule <k> C:Id => Mvalue(C) ...</k>
-       <mtype>... SetItem(C) ...</mtype> [structural]
-
-
-  /* Expr */
 ```
 
 ## Guard Semantics
