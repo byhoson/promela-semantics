@@ -35,6 +35,10 @@ module PROMELA-SYNTAX
 
   syntax Typename ::= "bit" | "byte" | "short" | "int" | "bool" [klabel(bool_T)] | "mtype" | "chan"
 
+  syntax Sequence ::= Step
+                    > Step ";" Sequence [klabel(seq)]
+                    | Step "->" Sequence [macro]
+ 
   syntax Step ::= Stmnt
                 | DeclLst
 
@@ -66,7 +70,7 @@ module PROMELA-SYNTAX
                    | AnyExpr Binarop AnyExpr  // TODO how about short-circuiting?
                    | Varref // TODO for now, varref also takes care of mtype values. fix this!
                    | Const
-                // but if a new nonterminal is introduced for mtype, how to distinguish?
+
   syntax Expr ::= AnyExpr
                 | "(" Expr ")" [bracket]
 
@@ -75,19 +79,13 @@ module PROMELA-SYNTAX
   syntax Const ::= Bool | "skip" | Int | Id // Id for mtype
 
   syntax Ids ::= NeList{Id, ","} [klabel(ids)]
-  syntax Modules ::= NeList{Module, ""} // TODO why ambiguous?
-//  syntax Sequence ::= NeList{Step, ";"} [klabel(seq)]
-//                 | Sequence "->" Sequence [klabel(seq)] // TODO handle -> better!
-//  syntax DeclLst ::= NeList{OneDecl, ";"} [klabel(decl_lst)] // TODO klabel : is it ok to identify decls with seq????
 
-  syntax Sequence ::= Step
-                    > Step ";" Sequence [klabel(seq)]
-                    | Step "->" Sequence [macro]
+  syntax Modules ::= NeList{Module, ""} // TODO why ambiguous?
+
   syntax DeclLst ::= OneDecl ";" DeclLst [klabel(decl_lst), prefer]
                    > OneDecl  // [klabel(decl_lst)]
+
   syntax Ivars ::= Ivar | Ivar "," Ivars [klabel(ivars)]
-//  syntax Ivars ::= NeList{Ivar, ","} [klabel(ivars)]
-//  syntax Ivars ::= Ids // TODO added this because the error msg required subsort decl. resolve this later
 ```
 
 ```k
@@ -184,7 +182,7 @@ TODO: (including arrays)
   rule (D:OneDecl ; DL:DeclLst):DeclLst => D ~> DL [structural]
   rule T:Typename I:Ivar, IL:Ivars => T I ~> T IL [structural]
 
-  /* Unfold Declaration with Initialization */
+  /* (Syntactic Sugar) Declaration with Initialization */
   rule T:Typename X:Id = E:AnyExpr => T X ~> (X = E):Assign [structural]
 
   /* Without Initialization */
@@ -208,26 +206,11 @@ TODO: (including arrays)
 ## Sequences
 ```k
   /*** Sequence & Step ***/
-
-//  syntax Bool ::= Executable(Step) [function]
-//  rule Executable(_:Step) => true [simplification]
-
-//  rule .Sequence => . [structural]
-  rule S:Expr ; SL:Sequence => Guard(S) ; SL [structural] // requires _:Expr :=K S [structural]
-  rule S:Step ; SL:Sequence => S ~> SL [structural, owise]
-  rule Guard(S) ; SL:Sequence => Guard(S) ~> SL [structural]
-  //rule Guard(S) => S ~> Guard(S) [structural]
-  //rule true ~> Guard(_) => . [structural]
-  //rule false ~> Guard(S) => . ~> Guard(S) [structural]
-  // if you define the above rule as 'false ~> .', trouble happens when the program contains false
-  // TODO how to resolve inifinite loop for false guards?
+  rule S:Expr ; SL:Sequence => Guard(S) ; SL [structural] 
+  rule S:Step ; SL:Sequence => S ~> SL [structural, owise] 
+    // Caution: In order for owise to work, var name should coincide (i.e. both rules should use S, SL)
+  rule Guard(E:Expr) ; SL:Sequence => Guard(E) ~> SL [structural]
   rule S:Step -> SL:Sequence => S ; SL [structural] // syntactic sugar
-
-
-  //rule .Steps => . [structural]
-  //rule S:Step -> SL:Steps => S ; SL [structural]
-  //rule SL1:Steps -> SL2:Steps => SL1 ~> SL2 [structural, owise] // Syntactic Sugar -> TODO can't i use concat for syntactic lists instead of ~>?
-  //rule S:Step ; SL:Steps => S ~> SL [structural] // requires Executable(S) [structural]
 ```
 
 ## Statements
@@ -238,7 +221,9 @@ TODO: (including arrays)
 
 ### Assignments
 ```k
-  rule _ = (E:AnyExpr => Eval(E)) requires notBool(isKResult(E))
+  rule <k> _ = (E:AnyExpr => Eval(E, L, G, S)) ...</k>
+       <env> L </env> <genv> G </genv> <store> S </store> requires notBool(isKResult(E))
+
   context (HOLE => lvalue(HOLE)) = _
 
   rule <k> loc(L):Varref = V:Val => . ...</k> <store>... L |-> (_ => V) ...</store>
@@ -254,20 +239,33 @@ TODO: (including arrays)
 ## Expressions
 We establish a separate semantics for expressions.
 While others are defined operationally, we define the semantics for expressions denotationally.
-This is to facilitate the definitions of blocking semantics for guards.
-Note that no interleaving happens during the evaluation of expressions in Promela.
+This is to facilitate defining the blocking semantics for guards.
+Note that no interleaving occurs during the evaluation of expressions in Promela.
 
 ### Arithmetic Expressions
 ```k
-  syntax Int ::= Eval(AnyExpr) [function]
-  rule Eval(I:Int) => I [simplification]
-  rule Eval(E1:AnyExpr + E2:AnyExpr) => Eval(E1) +Int Eval(E2) [simplification]
-  rule Eval(E1:AnyExpr - E2:AnyExpr) => Eval(E1) -Int Eval(E2) [simplification]
-  rule Eval(E1:AnyExpr * E2:AnyExpr) => Eval(E1) *Int Eval(E2) [simplification]
-  rule Eval(E1:AnyExpr / E2:AnyExpr) => Eval(E1) /Int Eval(E2) [simplification]
+//  syntax KItem ::= Eval(Expr, Map, Map, Map) [function] // expr, lenv, genv, store
+
+  syntax Int ::= Eval(Expr, Map, Map, Map) [function]
+//  rule Eval(I:Int, _, _, _) => I [simplification]
+
+  //rule Eval(X:Varref, L, G, S) => #if L[X] =/=K #False #then S[L[X]] #else #if G[X] =/=K #False #then S[G[X]] #else #False #fi #fi [simplification]
+//  rule Eval(X:Varref, L, _, S) => S[L[X]] requires L[X] =/=K #False [simplification]
+  //rule Eval(X:Varref, _, G, S) => S[G[X]] requires G[X] =/=K #False [simplification, owise] // owise -> if then
+
+//  rule Eval(E1:AnyExpr + E2:AnyExpr, L, G, S) => Eval(E1, L, G, S) +Int Eval(E2, L, G, S) [simplification]
+//  rule Eval(E1:AnyExpr - E2:AnyExpr, L, G, S) => Eval(E1, L, G, S) -Int Eval(E2, L, G, S) [simplification]
+//  rule Eval(E1:AnyExpr * E2:AnyExpr, L, G, S) => Eval(E1, L, G, S) *Int Eval(E2, L, G, S) [simplification]
+//  rule Eval(E1:AnyExpr / E2:AnyExpr, L, G, S) => Eval(E1, L, G, S) /Int Eval(E2, L, G, S) requires Eval(E2, L, G, S) =/=K 0[simplification]
+
 ```
 
 ### Boolean Expressions
+```k
+//  syntax Bool ::= Eval(Expr, Map, Map, Map) [function]
+//  rule Eval(E1:AnyExpr == E2:AnyExpr, L, G, S) => Eval(E1, L, G, S) ==K Eval(E2, L, G, S) [simplification]
+```
+
 
 ### Mtypes
 ```k
@@ -297,11 +295,17 @@ so that the evaluation of the expression takes place at the meta level which doe
 
 Once the guard becomes "executable", it should disappear.
 
+
+```k
+  syntax Step ::= Guard(Expr)
+ // rule <k> Guard(E:Expr) => . ...</k> <env> L </env> <genv> G </genv> <store> S </store> requires Eval(E, L, G, S)
+```
+
 ```k
   /* Guard Semantics */
-  syntax Step ::= Guard(Step) // TODO better change it to Step -> Expr ??
-  syntax Bool ::= Executable(Step, Map, Map) [function] // arg: Guard, genv, store TODO add (local) env
-  syntax KItem ::= GuardEval(AnyExpr, Map, Map) [function]
+  //syntax Step ::= Guard(Step) // TODO better change it to Step -> Expr ??
+  //syntax Bool ::= Executable(Step, Map, Map) [function] // arg: Guard, genv, store TODO add (local) env
+  //syntax KItem ::= GuardEval(AnyExpr, Map, Map) [function]
 ```
 
 ### Executable
@@ -313,18 +317,18 @@ Somehow need to embed GuardEval into values such as Int so >Int on them makes se
   //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) <K GuardEval(E2, Rho, Sig) [simplification]
   //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) >=K GuardEval(E2, Rho, Sig) [simplification]
   //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) <=K GuardEval(E2, Rho, Sig) [simplification]
-  rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) ==K GuardEval(E2, Rho, Sig) [simplification]
-  rule Executable(Guard(E1:AnyExpr != E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) =/=K GuardEval(E2, Rho, Sig) [simplification]
+  //rule Executable(Guard(E1:AnyExpr == E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) ==K GuardEval(E2, Rho, Sig) [simplification]
+  //rule Executable(Guard(E1:AnyExpr != E2:AnyExpr), Rho, Sig) => GuardEval(E1, Rho, Sig) =/=K GuardEval(E2, Rho, Sig) [simplification]
 ```
 
 ### GuardEval
 ```k
   /* GuardEval */
-  rule GuardEval(X:Varref, Rho:Map, Sig:Map) => Sig[Rho[X]] [simplification]
-  rule GuardEval(C:Int, _:Map, _:Map) => C [simplification]
+  //rule GuardEval(X:Varref, Rho:Map, Sig:Map) => Sig[Rho[X]] [simplification]
+  //rule GuardEval(C:Int, _:Map, _:Map) => C [simplification]
 
-  rule <k> Guard(S) => . ...</k>
-       <genv> Rho </genv> <store> Sig </store> requires Executable(Guard(S), Rho, Sig)
+  //rule <k> Guard(S) => . ...</k>
+  //     <genv> Rho </genv> <store> Sig </store> requires Executable(Guard(S), Rho, Sig)
 
   /*rule <k> Guard(E1:AnyExpr == E2:AnyExpr) ...</k>
        <genv> Rho </genv> <store> Sig </store>
